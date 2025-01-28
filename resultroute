@@ -1,0 +1,30 @@
+const express = require("express");
+const Result = require("./models/Result");
+const router = express.Router();
+
+// Submit a result
+router.post("/submit", async (req, res) => {
+  const { userEmail, score } = req.body;
+
+  try {
+    const newResult = new Result({ userEmail, score });
+    await newResult.save();
+    res.json({ status: "ok" });
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+});
+
+// Fetch user results
+router.get("/results", async (req, res) => {
+  const { email } = req.query;
+
+  try {
+    const results = await Result.find({ userEmail: email });
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+});
+
+module.exports = router;
