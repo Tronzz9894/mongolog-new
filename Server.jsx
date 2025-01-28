@@ -1,47 +1,86 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 const app = express();
 
-app.use(cors());
+// Middleware
 app.use(express.json());
+app.use(cors());
 
-mongoose
-  .connect('mongodb+srv://reactassess:<password>@cluster0.kuctm.mongodb.net/myDatabase?retryWrites=true&w=majority', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+// MongoDB connection
+mongoose.connect('mongodb://localhost:27017/quizapp', { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((err) => console.error('Failed to connect to MongoDB', err));
 
-const User = require('./models/User');
+// User model for authentication
+const User = mongoose.model('User', new mongoose.Schema({
+  username: { type: String, required: true },
+  password: { type: String, required: true }
+}));
 
-// POST /signup
-app.post('/signup', async (req, res) => {
-  try {
-    const { username, email, password } = req.body;
+// Quiz model
+const Quiz = mongoose.model('Quiz', new mongoose.Schema({
+  question: { type: String, required: true },
+  options: [String],
+  correctAnswer: String
+}));
 
-    // Check if the email already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).send('Email already registered.');
-    }
+// Score model to store the user's score
+const Score = mongoose.model('Score', new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  score: { type: Number, required: true }
+}));
 
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
+// Authentication middleware
+const authenticateToken = (req, res, next) => {
+  const token = req.header('Authorization')?.split(' ')[1];
+  if (!token) return res.status(401).send('Access denied');
 
-    // Create the new user
-    const newUser = new User({ username, email, password: hashedPassword });
-    await newUser.save();
+  jwt.verify(token, 'secretkey', (err, user) => {
+    if (err) return res.status(403).send('Invalid token');
+    req.user = user;
+    next();
+  });
+};
 
-    res.status(200).send('Signup successful!');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Server error');
+// Routes
+
+// Login route to authenticate users
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  const user = await User.findOne({ username });
+  if (!user || !bcrypt.compareSync(password, user.password)) {
+    return res.status(401).send('Invalid credentials');
   }
+
+  const token = jwt.sign({ userId: user._id }, 'secretkey', { expiresIn: '1h' });
+  res.json({ token });
 });
 
-const PORT = 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+// Quiz route
+app.get('/api/quiz', authenticateToken, async (req, res) => {
+  const quiz = await Quiz.find();
+  res.json({ data: quiz });
+});
+
+// Route to save score after completing the quiz
+app.post('/api/score', authenticateToken, async (req, res) => {
+  const { score } = req.body;
+
+  const newScore = new Score({
+    userId: req.user.userId,
+    score: score
+  });
+
+  await newScore.save();
+  res.json({ message: 'Score saved successfully!' });
+});
+
+// Start the server
+app.listen(5000, () => {
+  console.log('Server running on port 5000');
+});
